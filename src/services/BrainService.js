@@ -9,37 +9,48 @@ class BrainService {
     this.dataset = null;
     this.isInitialized = false;
     this.modelPath = path.resolve("./models/brain-model.json");
+
+    // Bind methods to ensure correct 'this' context
+    this.calculateContextualRelevance = this.calculateContextualRelevance.bind(this);
+    this.processContext = this.processContext.bind(this);
+    this.findAnswer = this.findAnswer.bind(this);
+    this.trainBrainNetwork = this.trainBrainNetwork.bind(this);
+    this.generateAugmentedDataset = this.generateAugmentedDataset.bind(this);
+    this.generateLimitedAugmentedDataset = this.generateLimitedAugmentedDataset.bind(this);
+    this.calculateSimilarity = this.calculateSimilarity.bind(this);
+    this.calculateSemanticSimilarity = this.calculateSemanticSimilarity.bind(this);
+    this.calculateContextSimilarity = this.calculateContextSimilarity.bind(this);
+    this.calculateSentiment = this.calculateSentiment.bind(this);
+    this.normalizeText = this.normalizeText.bind(this);
+    this.indonesianStemmer = this.indonesianStemmer.bind(this);
+    this.textToEnhancedVector = this.textToEnhancedVector.bind(this);
+    this.extractUniqueTags = this.extractUniqueTags.bind(this);
+    this.getPredictedTags = this.getPredictedTags.bind(this);
+    this.retrainModel = this.retrainModel.bind(this);
+    this.trainWithDataset = this.trainWithDataset.bind(this);
+    this.exportModel = this.exportModel.bind(this);
   }
 
-  /**
-   * Initialize Brain.js network
-   */
   async init() {
     try {
-      // Initialize Brain.js network with optimized architecture for Ryzen 3 7000 series
       this.brainNetwork = new brain.NeuralNetwork({
         hiddenLayers: [24, 16, 8],
-        activation: "sigmoid", // Aktivasi yang cocok untuk output [0, 1]
-        learningRate: 0.01, // Dengan sigmoid, learningRate sebaiknya kecil
+        activation: "sigmoid",
+        learningRate: 0.01,
         momentum: 0.8,
         binaryThresh: 0.5,
-        errorThresh: 0.003, // Cukup ketat
+        errorThresh: 0.003,
         dropout: 0.1,
         batchSize: 32,
       });
 
-      // Load dataset
       await this.loadDataset();
 
-      // Try to load pre-trained model first
       const modelLoaded = await this.loadTrainedModel();
 
-      if (!modelLoaded) {
-        // Train Brain.js network if no pre-trained model exists
-        if (this.dataset && this.dataset.length > 0) {
-          await this.trainBrainNetwork();
-          await this.saveTrainedModel();
-        }
+      if (!modelLoaded && this.dataset && this.dataset.length > 0) {
+        await this.trainBrainNetwork();
+        await this.saveTrainedModel();
       }
 
       this.isInitialized = true;
@@ -51,14 +62,36 @@ class BrainService {
   }
 
   /**
-   * Load dataset from file
+   * Calculate contextual relevance between a question and a dataset entry
+   * @param {string} question - The input question string
+   * @param {Object} entry - The dataset entry object containing at least a question field
+   * @returns {number} - A numeric relevance score between 0 and 1
    */
+  calculateContextualRelevance(question, entry) {
+    try {
+      if (!entry || !entry.question) {
+        return 0;
+      }
+      return this.calculateContextSimilarity(question, entry.question);
+    } catch (error) {
+      logger.error(`Error in calculateContextualRelevance: ${error.message}`);
+      return 0;
+    }
+  }
+
+  stemText(text) {
+    if (!text) return "";
+
+    return text
+      .split(" ")
+      .map((word) => this.indonesianStemmer(word))
+      .join(" ");
+  }
   async loadDataset() {
     try {
       const datasetPath = process.env.DATASET_PATH || "./data/dataset.json";
       const fullPath = path.resolve(datasetPath);
 
-      // Check if dataset file exists
       try {
         await fs.access(fullPath);
         const data = await fs.readFile(fullPath, "utf8");
@@ -76,9 +109,6 @@ class BrainService {
     }
   }
 
-  /**
-   * Get default dataset for training
-   */
   getDefaultDataset() {
     return [
       {
@@ -107,9 +137,6 @@ class BrainService {
     ];
   }
 
-  /**
-   * Load pre-trained model
-   */
   async loadTrainedModel() {
     try {
       await fs.access(this.modelPath);
@@ -125,12 +152,8 @@ class BrainService {
     }
   }
 
-  /**
-   * Save trained model
-   */
   async saveTrainedModel() {
     try {
-      // Ensure models directory exists
       const modelsDir = path.dirname(this.modelPath);
       await fs.mkdir(modelsDir, { recursive: true });
 
@@ -142,16 +165,10 @@ class BrainService {
     }
   }
 
-  /**
-   * Generate augmented dataset with variations to handle typos and different input patterns
-   * This helps the model become more robust to typos and variations in user input
-   * Used for smaller datasets (<10k entries)
-   */
   generateAugmentedDataset() {
-    const augmentedDataset = [...this.dataset]; // Start with original dataset
+    const augmentedDataset = [...this.dataset];
     const originalSize = this.dataset.length;
 
-    // Only augment a portion of the dataset to avoid overfitting
     const samplesToAugment = Math.min(originalSize, 300);
     const sampledData = this.dataset
       .slice()
@@ -159,7 +176,6 @@ class BrainService {
       .slice(0, samplesToAugment);
 
     for (const item of sampledData) {
-      // Create variations with typos
       const typoVariations = this.generateTypoVariations(item.question);
 
       for (const variation of typoVariations) {
@@ -170,7 +186,6 @@ class BrainService {
         });
       }
 
-      // Create word order variations
       const wordOrderVariations = this.generateWordOrderVariations(
         item.question
       );
@@ -190,20 +205,13 @@ class BrainService {
     return augmentedDataset;
   }
 
-  /**
-   * Generate limited augmented dataset for large datasets (>10k entries)
-   * Uses more selective augmentation to avoid memory issues
-   */
   generateLimitedAugmentedDataset() {
     const startTime = Date.now();
     logger.info("Generating limited augmented dataset for large dataset...");
 
-    // Start with original dataset
     const augmentedDataset = [...this.dataset];
     const originalSize = this.dataset.length;
 
-    // For large datasets, be very selective about augmentation
-    // Focus on high-value categories that benefit most from augmentation
     const highValueCategories = [
       "greeting",
       "price_inquiry",
@@ -305,14 +313,10 @@ class BrainService {
     return augmentedDataset;
   }
 
-  /**
-   * Generate variations with common typos
-   */
   generateTypoVariations(text) {
     const variations = [];
     const words = text.split(" ");
 
-    // Common character substitutions in Indonesian typing
     const commonTypos = {
       a: ["s", "q", "z"],
       b: ["v", "g", "h", "n"],
@@ -391,9 +395,6 @@ class BrainService {
     return variations;
   }
 
-  /**
-   * Generate variations with different word orders
-   */
   generateWordOrderVariations(text) {
     const variations = [];
     const words = text.split(" ");
@@ -428,10 +429,6 @@ class BrainService {
     return variations;
   }
 
-  /**
-   * Extract unique tags from dataset
-   * @returns {Array<string>} - Array of unique tags
-   */
   extractUniqueTags() {
     try {
       // Create a Set to store unique tags
@@ -467,9 +464,6 @@ class BrainService {
     }
   }
 
-  /**
-   * Train Brain.js network with dataset
-   */
   async trainBrainNetwork() {
     try {
       logger.info(
@@ -1375,11 +1369,9 @@ class BrainService {
         await this.init();
       }
 
-      // Normalize and stem the question
       const normalizedQuestion = this.normalizeText(question);
       const stemmedQuestion = this.stemText(normalizedQuestion);
 
-      // Get neural network prediction
       const questionVector = this.textToEnhancedVector(question);
       const brainResult = this.brainNetwork.run(questionVector);
 
@@ -1409,10 +1401,10 @@ class BrainService {
 
           // Weighted combined score with emphasis on stemmed similarity for Indonesian
           const combinedScore =
-            exactSimilarity * 0.25 +
-            stemmedSimilarity * 0.35 +
-            semanticSimilarity * 0.25 +
-            contextualSimilarity * 0.15;
+            exactSimilarity * 0.3 +
+            stemmedSimilarity * 0.4 +
+            semanticSimilarity * 0.2 +
+            contextualSimilarity * 0.1;
 
           return {
             ...entry,
@@ -1421,47 +1413,31 @@ class BrainService {
             semanticSimilarity,
             contextualSimilarity,
             combinedScore,
-            normalizedQuestion: normalizedEntry,
-            stemmedQuestion: stemmedEntry,
           };
         })
         // Enhanced filtering with dynamic thresholds
         .filter((entry) => {
-          // Dynamic threshold based on question complexity
           const questionLength = normalizedQuestion.split(" ").length;
-          const baseThreshold = questionLength > 5 ? 0.15 : 0.2;
+          const baseThreshold = questionLength > 5 ? 0.18 : 0.22;
 
           return (
             entry.combinedScore > baseThreshold ||
-            entry.stemmedSimilarity > 0.3 ||
-            entry.semanticSimilarity > 0.35
+            entry.stemmedSimilarity > 0.35 ||
+            entry.semanticSimilarity > 0.4
           );
         })
         // Sort by combined score
         .sort((a, b) => b.combinedScore - a.combinedScore)
-        .slice(0, 5); // Get top 5 matches
+        .slice(0, 5);
 
-      // Get predicted tags from neural network
-      const predictedTags = this.getPredictedTags(brainResult);
-
-      // Calculate brain relevance score
       const brainRelevance = this.calculateBrainRelevance(brainResult);
 
-      // Determine predicted category
-      const predictedCategory = this.determinePredictedCategory(
-        brainResult,
-        predictedTags
-      );
-
-      // Get best context with confidence scoring
       const bestMatch = relevantEntries.length > 0 ? relevantEntries[0] : null;
       const context = bestMatch ? bestMatch.answer : "";
       const confidence = bestMatch ? bestMatch.combinedScore : 0;
 
       return {
         brainRelevance,
-        predictedCategory,
-        predictedTags,
         context,
         confidence,
         relevantEntries: relevantEntries.map((entry) => ({
@@ -1484,7 +1460,6 @@ class BrainService {
       return {
         brainRelevance: 0.3,
         predictedCategory: "unknown",
-        predictedTags: ["unknown"],
         context: "",
         confidence: 0,
         relevantEntries: [],
@@ -1496,178 +1471,6 @@ class BrainService {
     }
   }
 
-  /**
-   * Stem entire text using Indonesian Porter Stemmer
-   */
-  stemText(text) {
-    if (!text) return "";
-
-    return text
-      .split(" ")
-      .map((word) => this.indonesianStemmer(word))
-      .join(" ");
-  }
-
-  /**
-   * Calculate contextual relevance based on tags and intent matching
-   */
-  calculateContextualRelevance(question, entry) {
-    const questionIntent = this.extractIntent(question);
-    const entryTags = Array.isArray(entry.tags) ? entry.tags : [entry.tags];
-
-    // Intent-tag matching score
-    let intentScore = 0;
-    if (entryTags.includes(questionIntent)) {
-      intentScore = 0.8;
-    } else {
-      // Check for related intents
-      const relatedIntents = {
-        price_inquiry: ["available", "payment"],
-        availability: ["price_inquiry"],
-        payment: ["price_inquiry", "help"],
-        help: ["payment", "technical_details"],
-        greeting: ["help"],
-        goodbye: ["help"],
-      };
-
-      if (relatedIntents[questionIntent]) {
-        for (const relatedIntent of relatedIntents[questionIntent]) {
-          if (entryTags.includes(relatedIntent)) {
-            intentScore = 0.4;
-            break;
-          }
-        }
-      }
-    }
-
-    // Entity matching score (products/services)
-    const questionEntities = this.extractEntities(question);
-    const entryEntities = this.extractEntities(
-      entry.question + " " + entry.answer
-    );
-
-    let entityScore = 0;
-    if (questionEntities.length > 0 && entryEntities.length > 0) {
-      const commonEntities = questionEntities.filter((e) =>
-        entryEntities.includes(e)
-      );
-      entityScore =
-        commonEntities.length /
-        Math.max(questionEntities.length, entryEntities.length);
-    }
-
-    return intentScore * 0.7 + entityScore * 0.3;
-  }
-
-  /**
-   * Extract entities (products/services) from text
-   */
-  extractEntities(text) {
-    const entities = [
-      "netflix",
-      "spotify",
-      "youtube",
-      "disney",
-      "canva",
-      "vidio",
-      "amazon",
-      "hbo",
-      "game pass",
-      "chatgpt",
-      "loklok",
-      "prime",
-      "viu",
-      "wetv",
-      "iqiyi",
-      "mola tv",
-      "apple music",
-      "deezer",
-      "tidal",
-      "crunchyroll",
-      "hulu",
-      "paramount",
-      "peacock",
-    ];
-
-    const lowerText = text.toLowerCase();
-    return entities.filter((entity) => lowerText.includes(entity));
-  }
-
-  /**
-   * Calculate brain relevance score from neural network output
-   */
-  calculateBrainRelevance(brainResult) {
-    // Calculate average confidence across all tag predictions
-    const tagValues = [
-      brainResult.tag_greeting || 0,
-      brainResult.tag_price_inquiry || 0,
-      brainResult.tag_available || 0,
-      brainResult.tag_help || 0,
-      brainResult.tag_payment || 0,
-      brainResult.tag_goodbye || 0,
-      brainResult.tag_emerging_services || 0,
-      brainResult.tag_refund_policy || 0,
-      brainResult.tag_technical_details || 0,
-      brainResult.tag_referral_loyalty || 0,
-    ];
-
-    // Find the highest confidence tag
-    const maxConfidence = Math.max(...tagValues);
-
-    // Calculate overall relevance
-    const avgConfidence =
-      tagValues.reduce((sum, val) => sum + val, 0) / tagValues.length;
-
-    // Weighted combination of max and average confidence
-    return maxConfidence * 0.7 + avgConfidence * 0.3;
-  }
-
-  /**
-   * Determine predicted category from brain result
-   * @param {Object} brainResult - Output from brain.js network
-   * @param {Array<string>} predictedTags - Array of predicted tags
-   * @returns {string} - Best matching category
-   */
-  determinePredictedCategory(brainResult, predictedTags) {
-    const tagThreshold = 0.5;
-
-    // Get all unique tags from the dataset
-    const uniqueTags = this.extractUniqueTags();
-
-    // Build tag confidences dynamically
-    const tagConfidences = {};
-    uniqueTags.forEach((tag) => {
-      const tagKey = `tag_${tag}`;
-      tagConfidences[tag] = brainResult[tagKey] || 0;
-    });
-
-    let bestTag = "unknown";
-    let bestConfidence = tagThreshold;
-
-    // Find tag with highest confidence
-    for (const [tag, confidence] of Object.entries(tagConfidences)) {
-      if (confidence > bestConfidence) {
-        bestTag = tag;
-        bestConfidence = confidence;
-      }
-    }
-
-    return bestTag;
-  }
-
-  /**
-   * Legacy method for backward compatibility
-   */
-  async getContextFromDataset(question) {
-    const result = await this.processContext(question);
-    return {
-      predictedTags: result.predictedTags,
-      context: result.context,
-      relevantEntries: result.relevantEntries,
-      totalDatasetSize: result.totalDatasetSize,
-      brainAnalysis: result.brainAnalysis,
-    };
-  }
 
   /**
    * Get predicted tags from brain.js output
@@ -1873,6 +1676,27 @@ class BrainService {
     }
 
     return result;
+  }
+
+    /**
+   * Menghitung relevansi hasil prediksi brain.js terhadap pertanyaan.
+   * Nilai lebih tinggi berarti prediksi lebih yakin dan relevan.
+   * @param {Object} brainResult - Output dari brain.js network (hasil .run)
+   * @returns {number} - Skor relevansi antara 0 dan 1
+   */
+  calculateBrainRelevance(brainResult) {
+    if (!brainResult || typeof brainResult !== "object") return 0;
+    // Ambil semua nilai output tag_*
+    const tagScores = Object.entries(brainResult)
+      .filter(([key]) => key.startsWith("tag_"))
+      .map(([, value]) => typeof value === "number" ? value : 0);
+
+    if (tagScores.length === 0) return 0;
+    // Ambil skor tertinggi sebagai relevansi utama
+    const maxScore = Math.max(...tagScores);
+    // Rata-rata juga bisa dipakai jika ingin lebih konservatif:
+    // const avgScore = tagScores.reduce((a, b) => a + b, 0) / tagScores.length;
+    return maxScore;
   }
 
   /**

@@ -41,15 +41,13 @@ class QuestionProcessor {
       logger.info(`Memproses pertanyaan: ${question}`);
       const startTime = Date.now();
 
-      // Langkah 1: Gunakan BrainService untuk mendapatkan konteks dan tag
+      // Langkah 1: Gunakan BrainService untuk mendapatkan konteks
       const brainResult = await this.brainService.processContext(question);
-      const tags = await this.brainService.tagQuestion(question, brainResult.relevantEntries);
 
       // Langkah 2: Proses dengan OllamaService menggunakan template LangChain
       const aiResult = await this.ollamaService.processWithAI(
         question, 
-        brainResult, 
-        tags, 
+        brainResult,
         number_whatsapp
       );
 

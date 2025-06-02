@@ -316,7 +316,7 @@ class TrainingDataManager {
       const results = [];
       
       for (const question of testQuestions) {
-        const result = await this.brainService.getContextFromDataset(question);
+        const result = await this.brainService.processContext(question);
         
         results.push({
           question,

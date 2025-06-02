@@ -243,11 +243,10 @@ class OllamaService {
    * Memproses pertanyaan pelanggan menggunakan AI.
    * @param {string} question - Pertanyaan pelanggan.
    * @param {Object} context - Konteks dari BrainService.
-   * @param {Array} tags - Tag yang diidentifikasi.
-   * @param {string} nomorWhatsapp - Nomor WhatsApp pelanggan.
+   * @param {string} nomorWhatsapp - Nomor WhatsApp pelanggan untuk mendapatkan riwayat chat.
    * @returns {Promise<Object>} - Hasil pemrosesan AI, termasuk respons dan informasi produk.
    */
-  async processWithAI(question, context, tags, nomorWhatsapp) {
+  async processWithAI(question, context, nomorWhatsapp) {
     try {
       if (!this.initialized) {
         await this.init();
@@ -265,13 +264,8 @@ class OllamaService {
           {type: 'ai', content: msg.content};
       });
 
-      // Pilih hanya satu tag yang paling akurat dari array tags
-      // Jika ada lebih dari satu, ambil yang paling relevan (misal: urutan pertama hasil NER/tagging)
-      // Jika tags kosong, fallback ke 'unknown'
-      console.log(tags)
-      const tag = Array.isArray(tags) && tags.length > 0 ? tags[0] : 'unknown';
-      console.log(`Tag yang dipilih: ${tag}`);
-      let systemTemplate = this.tagTemplates[tag] || this.tagTemplates.unknown;
+      const tags = await this.getQuestionTag(question);
+      let systemTemplate = this.tagTemplates[tags] || this.tagTemplates.unknown;
 
       const relevantInfo = this.formatRelevantInfo(context.relevantEntries);
 
@@ -312,7 +306,6 @@ class OllamaService {
         query: question
       });
 
-      // Pastikan yang dikirim ke invoke adalah array of message objects
       const startTime = Date.now();
       const response = await this.chatModel.invoke(formattedMessages);
       const processingTime = Date.now() - startTime;
@@ -340,7 +333,7 @@ class OllamaService {
       return {
         response: response.content,
         processingTime,
-        tag,
+        tags,
         productInfo
       };
 
@@ -420,7 +413,7 @@ class OllamaService {
       const messages = [
         {
           role: "user",
-          content: `Classify the following question into one of the tags: price_inquiry, availability, help, greeting, unknown. Return only the tag for this question: "${question}"`
+          content: `Classify the following question into one of the tags: price_inquiry, availability, greeting, technical_details, payment_method, refund_policy, emerging_services, warranty_refund, referral_loyalty, order, unknown. Return only the tag for this question: "${question}"`
         }
       ];
 
@@ -430,7 +423,10 @@ class OllamaService {
           properties: {
             tag: {
               type: "string",
-              enum: ["price_inquiry", "availability", "help", "greeting", "unknown"]
+              enum: ["price_inquiry", "availability", "greeting", "technical_details", 
+                "payment_method", "refund_policy", "emerging_services", 
+                "warranty_refund", "referral_loyalty", "order", "unknown"
+              ]         
             }
           },
           required: ["tag"]
@@ -449,7 +445,19 @@ class OllamaService {
       }
 
       // Validate tag
-      const validTags = ["price_inquiry", "availability", "help", "greeting", "unknown"];
+      const validTags = [
+        "price_inquiry",
+        "availability",
+        "greeting",
+        "technical_details",
+        "payment_method",
+        "refund_policy",
+        "emerging_services",
+        "warranty_refund",
+        "referral_loyalty",
+        "order",
+        "unknown",
+      ];
       if (!validTags.includes(tag)) {
         tag = "unknown";
       }
