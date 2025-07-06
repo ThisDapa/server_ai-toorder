@@ -1,78 +1,137 @@
+/**
+ * Logger Module
+ * Centralized logging configuration using Winston
+ */
+
+'use strict';
+
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 
-// Create logs directory if it doesn't exist
-const logsDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+// Configuration constants
+const CONFIG = {
+  LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+  SERVICE_NAME: 'ai-server',
+  MAX_FILE_SIZE: 5242880, // 5MB
+  MAX_FILES: 5,
+  TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss',
+  CONSOLE_TIMESTAMP_FORMAT: 'HH:mm:ss'
+};
+
+// File paths
+const PATHS = {
+  LOGS_DIR: path.join(process.cwd(), 'logs'),
+  ERROR_LOG: 'error.log',
+  COMBINED_LOG: 'combined.log',
+  EXCEPTIONS_LOG: 'exceptions.log',
+  REJECTIONS_LOG: 'rejections.log'
+};
+
+/**
+ * Initialize logging directory
+ */
+function initializeLogsDirectory() {
+  if (!fs.existsSync(PATHS.LOGS_DIR)) {
+    fs.mkdirSync(PATHS.LOGS_DIR, { recursive: true });
+  }
 }
 
-// Define log format
-const logFormat = winston.format.combine(
-  winston.format.timestamp({
-    format: 'YYYY-MM-DD HH:mm:ss'
-  }),
-  winston.format.errors({ stack: true }),
-  winston.format.json(),
-  winston.format.prettyPrint()
-);
+/**
+ * Create file format for logs
+ * @returns {winston.Logform.Format} Configured Winston format
+ */
+function createFileFormat() {
+  return winston.format.combine(
+    winston.format.timestamp({
+      format: CONFIG.TIMESTAMP_FORMAT
+    }),
+    winston.format.errors({ stack: true }),
+    winston.format.json(),
+    winston.format.prettyPrint()
+  );
+}
 
-// Console format for development
-const consoleFormat = winston.format.combine(
-  winston.format.colorize(),
-  winston.format.timestamp({
-    format: 'HH:mm:ss'
-  }),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    let msg = `${timestamp} [${level}]: ${message}`;
-    if (Object.keys(meta).length > 0) {
-      msg += ` ${JSON.stringify(meta)}`;
-    }
-    return msg;
-  })
-);
+/**
+ * Create console format for development
+ * @returns {winston.Logform.Format} Configured Winston format for console
+ */
+function createConsoleFormat() {
+  return winston.format.combine(
+    winston.format.colorize(),
+    winston.format.timestamp({
+      format: CONFIG.CONSOLE_TIMESTAMP_FORMAT
+    }),
+    winston.format.printf(formatConsoleOutput)
+  );
+}
+
+/**
+ * Format console output
+ * @param {Object} info - Log information
+ * @returns {string} Formatted log message
+ */
+function formatConsoleOutput({ timestamp, level, message, ...meta }) {
+  let msg = `${timestamp} [${level}]: ${message}`;
+  if (Object.keys(meta).length > 0) {
+    msg += ` ${JSON.stringify(meta)}`;
+  }
+  return msg;
+}
+
+/**
+ * Create file transport for logs
+ * @param {string} filename - Log file name
+ * @param {string} [level] - Log level
+ * @returns {winston.transport} Winston file transport
+ */
+function createFileTransport(filename, level) {
+  const options = {
+    filename: path.join(PATHS.LOGS_DIR, filename),
+    maxsize: CONFIG.MAX_FILE_SIZE,
+    maxFiles: CONFIG.MAX_FILES
+  };
+  
+  if (level) {
+    options.level = level;
+  }
+  
+  return new winston.transports.File(options);
+}
+
+// Initialize logs directory
+initializeLogsDirectory();
 
 // Create logger instance
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: logFormat,
-  defaultMeta: { service: 'ai-server' },
+  level: CONFIG.LOG_LEVEL,
+  format: createFileFormat(),
+  defaultMeta: { service: CONFIG.SERVICE_NAME },
   transports: [
-    // Write all logs to file
-    new winston.transports.File({
-      filename: path.join(logsDir, 'error.log'),
-      level: 'error',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    }),
-    new winston.transports.File({
-      filename: path.join(logsDir, 'combined.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
+    createFileTransport(PATHS.ERROR_LOG, 'error'),
+    createFileTransport(PATHS.COMBINED_LOG)
   ],
-  // Handle exceptions and rejections
   exceptionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'exceptions.log')
-    })
+    createFileTransport(PATHS.EXCEPTIONS_LOG)
   ],
   rejectionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'rejections.log')
-    })
+    createFileTransport(PATHS.REJECTIONS_LOG)
   ]
 });
 
 // Add console transport for development
 if (process.env.NODE_ENV !== 'production') {
   logger.add(new winston.transports.Console({
-    format: consoleFormat
+    format: createConsoleFormat()
   }));
 }
 
-// Add request logging helper
+/**
+ * Log HTTP request details
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ * @param {number} responseTime - Response time in milliseconds
+ */
 logger.logRequest = (req, res, responseTime) => {
   const logData = {
     method: req.method,
@@ -83,19 +142,25 @@ logger.logRequest = (req, res, responseTime) => {
     userAgent: req.get('User-Agent')
   };
   
-  if (res.statusCode >= 400) {
-    logger.warn('HTTP Request', logData);
-  } else {
-    logger.info('HTTP Request', logData);
-  }
+  const logLevel = res.statusCode >= 400 ? 'warn' : 'info';
+  logger[logLevel]('HTTP Request', logData);
 };
 
-// Add AI processing logging helper
+/**
+ * Log AI processing stages
+ * @param {string} questionId - Question identifier
+ * @param {string} stage - Processing stage
+ * @param {Object} data - Additional data
+ */
 logger.logAIProcess = (questionId, stage, data = {}) => {
   logger.info(`AI Processing [${questionId}] - ${stage}`, data);
 };
 
-// Add error logging helper
+/**
+ * Log application errors
+ * @param {Error} error - Error object
+ * @param {Object} context - Additional context
+ */
 logger.logError = (error, context = {}) => {
   logger.error('Application Error', {
     message: error.message,

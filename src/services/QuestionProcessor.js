@@ -1,8 +1,24 @@
+/**
+ * QuestionProcessor Module
+ * Handles the processing of questions through the AI pipeline
+ * Integrates BrainService for context retrieval and OllamaService for AI processing
+ */
+
+'use strict';
+
 const logger = require('../utils/logger');
 const BrainService = require('./BrainService');
 const OllamaService = require('./OllamaService');
 
+/**
+ * QuestionProcessor class
+ * Coordinates the processing of questions through multiple AI services
+ */
 class QuestionProcessor {
+  /**
+   * Creates a new QuestionProcessor instance
+   * Initializes required services and starts initialization process
+   */
   constructor() {
     this.brainService = new BrainService();
     this.ollamaService = new OllamaService();
@@ -11,11 +27,13 @@ class QuestionProcessor {
   }
 
   /**
-   * Inisialisasi layanan
+   * Initializes all required services
+   * @returns {Promise<void>} Resolves when initialization is complete
+   * @throws {Error} If initialization fails
    */
   async init() {
     try {
-      // Layanan menginisialisasi diri mereka sendiri
+      // Initialize services in parallel for better performance
       await Promise.all([
         this.brainService.init(),
         this.ollamaService.init()
@@ -30,44 +48,93 @@ class QuestionProcessor {
   }
 
   /**
-   * Memproses pertanyaan melalui pipeline lengkap
+   * Processes a question through the complete AI pipeline
+   * @param {string} question - The question to process
+   * @param {string} number_whatsapp - WhatsApp number for context
+   * @returns {Promise<Object>} The processed result with metadata
+   * @throws {Error} If processing fails
    */
   async processQuestion(question, number_whatsapp) {
     try {
-      if (!this.isInitialized) {
-        await this.init();
-      }
-
+      await this.ensureInitialized();
       logger.info(`Memproses pertanyaan: ${question}`);
+      
       const startTime = Date.now();
-
-      // Langkah 1: Gunakan BrainService untuk mendapatkan konteks
-      const brainResult = await this.brainService.processContext(question);
-
-      // Langkah 2: Proses dengan OllamaService menggunakan template LangChain
-      const aiResult = await this.ollamaService.processWithAI(
-        question, 
-        brainResult,
-        number_whatsapp
-      );
-
-      const processingTime = Date.now() - startTime;
-      logger.info(`Pertanyaan diproses dalam ${processingTime}ms`);
-
-      return {
-        ...aiResult,
-        processingTime,
-        brainRelevance: brainResult.brainRelevance,
-        relevantEntriesCount: brainResult.relevantEntries.length
-      };
+      
+      // Step 1: Get context from BrainService
+      const brainResult = await this.retrieveContext(question);
+      
+      // Step 2: Process with OllamaService using LangChain template
+      const aiResult = await this.generateAIResponse(question, brainResult, number_whatsapp);
+      
+      // Step 3: Prepare and return the final result
+      return this.prepareProcessingResult(aiResult, brainResult, startTime);
     } catch (error) {
       logger.error(`Error memproses pertanyaan: ${error.message}`);
       throw error;
     }
   }
+  
+  /**
+   * Ensures the processor is initialized
+   * @returns {Promise<void>}
+   * @private
+   */
+  async ensureInitialized() {
+    if (!this.isInitialized) {
+      await this.init();
+    }
+  }
+  
+  /**
+   * Retrieves context for a question using BrainService
+   * @param {string} question - The question to get context for
+   * @returns {Promise<Object>} Context information
+   * @private
+   */
+  async retrieveContext(question) {
+    return await this.brainService.processContext(question);
+  }
+  
+  /**
+   * Generates AI response using OllamaService
+   * @param {string} question - The original question
+   * @param {Object} brainResult - Context from BrainService
+   * @param {string} number_whatsapp - WhatsApp number
+   * @returns {Promise<Object>} AI processing result
+   * @private
+   */
+  async generateAIResponse(question, brainResult, number_whatsapp) {
+    return await this.ollamaService.processWithAI(
+      question, 
+      brainResult,
+      number_whatsapp
+    );
+  }
+  
+  /**
+   * Prepares the final processing result with metadata
+   * @param {Object} aiResult - Result from AI processing
+   * @param {Object} brainResult - Result from context retrieval
+   * @param {number} startTime - Processing start timestamp
+   * @returns {Object} Final result with metadata
+   * @private
+   */
+  prepareProcessingResult(aiResult, brainResult, startTime) {
+    const processingTime = Date.now() - startTime;
+    logger.info(`Pertanyaan diproses dalam ${processingTime}ms`);
+    
+    return {
+      ...aiResult,
+      processingTime,
+      brainRelevance: brainResult.brainRelevance,
+      relevantEntriesCount: brainResult.relevantEntries.length
+    };
+  }
 
   /**
-   * Mendapatkan statistik prosesor
+   * Gets processor statistics
+   * @returns {Object} Statistics about the processor and its services
    */
   getStats() {
     return {
@@ -78,7 +145,9 @@ class QuestionProcessor {
   }
 
   /**
-   * Melatih ulang jaringan Brain.js dengan data baru
+   * Retrains the Brain.js network with new data
+   * @param {Array|null} newData - Optional new training data
+   * @returns {Promise<Object|boolean>} Training result or false if failed
    */
   async retrain(newData = null) {
     try {
@@ -92,7 +161,8 @@ class QuestionProcessor {
   }
 
   /**
-   * Menguji prosesor dengan pertanyaan sampel
+   * Tests the processor with a sample question
+   * @returns {Promise<Object>} Test results
    */
   async test() {
     try {
@@ -114,7 +184,8 @@ class QuestionProcessor {
   }
 
   /**
-   * Menguji layanan individual
+   * Tests individual services
+   * @returns {Promise<Object>} Test results for each service
    */
   async testServices() {
     try {
