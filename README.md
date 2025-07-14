@@ -4,8 +4,14 @@ Server AI yang memproses pertanyaan menggunakan Brain.js untuk analisis dataset,
 
 ## Flowchart Sistem
 
+### Pemrosesan Pertanyaan
 ```
 GET Question → Get Context from Dataset (Brain.js) → Tag Question → Process with LangChain + Ollama → Send Response
+```
+
+### Manajemen Produk
+```
+Product API Request → OllamaService Product Management → Product Data Operations → JSON Response
 ```
 
 ## Fitur Utama
@@ -17,6 +23,7 @@ GET Question → Get Context from Dataset (Brain.js) → Tag Question → Proces
 - ✅ **Question Tagging**: Otomatis menentukan tag berdasarkan konteks
 - ✅ **Status Tracking**: Real-time monitoring proses pertanyaan
 - ✅ **Comprehensive Logging**: Logging lengkap untuk debugging dan monitoring
+- ✅ **Product Management**: API lengkap untuk manajemen katalog produk (CRUD)
 
 ## Struktur Folder
 
@@ -25,9 +32,11 @@ servers_ai-toOrder/
 ├── src/
 │   ├── server.js                 # Main server file
 │   ├── routes/
-│   │   └── questionRoutes.js     # API routes untuk pertanyaan
+│   │   └── questionRoutes.js     # API routes untuk pertanyaan dan produk
 │   ├── services/
-│   │   └── QuestionProcessor.js  # Core logic Brain.js + LangChain + Ollama
+│   │   ├── QuestionProcessor.js  # Core logic Brain.js + LangChain + Ollama
+│   │   ├── BrainService.js       # Neural network service
+│   │   └── OllamaService.js      # Ollama integration dan product management
 │   ├── middleware/
 │   │   ├── validateQuestion.js   # Validasi input pertanyaan
 │   │   └── errorHandler.js       # Global error handling
@@ -152,7 +161,165 @@ ollama serve
 }
 ```
 
-### 3. Health Check
+### 3. Product Management API
+
+#### 3.1 Get All Products
+
+**GET** `/api/products`
+
+**Response:**
+```json
+{
+  "success": true,
+  "products": [
+    {
+      "code": "P001",
+      "name": "Product Name",
+      "price": 10000,
+      "stock": 100,
+      "description": "Product description"
+    }
+  ],
+  "count": 1,
+  "timestamp": "2024-01-01T10:00:00.000Z"
+}
+```
+
+#### 3.2 Get Product by Identifier
+
+**GET** `/api/products/:identifier`
+
+**Response:**
+```json
+{
+  "success": true,
+  "product": {
+    "code": "P001",
+    "name": "Product Name",
+    "price": 10000,
+    "stock": 100,
+    "description": "Product description"
+  }
+}
+```
+
+#### 3.3 Search Products
+
+**GET** `/api/products/search?keyword=searchterm`
+
+**Response:**
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "product": {
+        "code": "P001",
+        "name": "Product Name",
+        "price": 10000,
+        "stock": 100,
+        "description": "Product description"
+      },
+      "matches": ["name", "description"]
+    }
+  ],
+  "count": 1
+}
+```
+
+#### 3.4 Add New Product
+
+**POST** `/api/products`
+
+```json
+{
+  "code": "P002",
+  "name": "New Product",
+  "price": 15000,
+  "stock": 50,
+  "description": "New product description"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Product added successfully",
+  "product": {
+    "code": "P002",
+    "name": "New Product",
+    "price": 15000,
+    "stock": 50,
+    "description": "New product description"
+  }
+}
+```
+
+#### 3.5 Update Product
+
+**PUT** `/api/products/:productCode`
+
+```json
+{
+  "price": 20000,
+  "description": "Updated description"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Product updated successfully",
+  "product": {
+    "code": "P001",
+    "name": "Product Name",
+    "price": 20000,
+    "stock": 100,
+    "description": "Updated description"
+  }
+}
+```
+
+#### 3.6 Update Product Stock
+
+**PATCH** `/api/products/stock/:productCode`
+
+```json
+{
+  "stock": 75
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Stock updated successfully",
+  "product": {
+    "code": "P001",
+    "name": "Product Name",
+    "price": 10000,
+    "stock": 75,
+    "description": "Product description"
+  }
+}
+```
+
+#### 3.7 Delete Product
+
+**DELETE** `/api/products/:identifier`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Product deleted successfully"
+}
+```
+
+### 4. Health Check
 
 **GET** `/health`
 

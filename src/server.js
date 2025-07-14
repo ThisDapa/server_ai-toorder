@@ -10,6 +10,8 @@ const Fastify = require('fastify');
 const fastifyHelmet = require('@fastify/helmet');
 const fastifyCors = require('@fastify/cors');
 const fastifyFormBody = require('@fastify/formbody');
+const Ajv = require('ajv');
+const AjvErrors = require('ajv-errors');
 const logger = require('./utils/logger');
 const questionRoutes = require('./routes/questionRoutes');
 const errorHandler = require('./middleware/errorHandler');
@@ -23,11 +25,20 @@ const TIMEOUT = 600000; // 10 minutes
  * Initialize and start the server
  */
 async function startServer() {
+
+  // Initialize Ajv
+  const ajv = new Ajv({ allErrors: true, coerceTypes: true });
+  // We don't need AjvErrors since we removed errorMessage from schemas
+  // AjvErrors(ajv);
+
   // Create Fastify instance with configuration
   const fastify = Fastify({
     connectionTimeout: TIMEOUT,
     keepAliveTimeout: TIMEOUT,
-    logger: false // Using custom logger instead
+    logger: false,
+    ajv: {
+      instance: ajv
+    }
   });
 
   // Register plugins

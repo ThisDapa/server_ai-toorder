@@ -49,12 +49,14 @@ class QuestionProcessor {
 
   /**
    * Processes a question through the complete AI pipeline
+   * @param {string} name_store - Name Store
    * @param {string} question - The question to process
    * @param {string} number_whatsapp - WhatsApp number for context
+   * @param {Object} product_data - Product data
    * @returns {Promise<Object>} The processed result with metadata
    * @throws {Error} If processing fails
    */
-  async processQuestion(question, number_whatsapp) {
+  async processQuestion(name_store, question, number_whatsapp, product_data) {
     try {
       await this.ensureInitialized();
       logger.info(`Memproses pertanyaan: ${question}`);
@@ -65,12 +67,12 @@ class QuestionProcessor {
       const brainResult = await this.retrieveContext(question);
       
       // Step 2: Process with OllamaService using LangChain template
-      const aiResult = await this.generateAIResponse(question, brainResult, number_whatsapp);
+      const aiResult = await this.generateAIResponse(name_store, question, brainResult, number_whatsapp, product_data);
       
       // Step 3: Prepare and return the final result
       return this.prepareProcessingResult(aiResult, brainResult, startTime);
     } catch (error) {
-      logger.error(`Error memproses pertanyaan: ${error.message}`);
+      logger.error(`Error memproses pertanyaan: ${error}`);
       throw error;
     }
   }
@@ -93,22 +95,29 @@ class QuestionProcessor {
    * @private
    */
   async retrieveContext(question) {
-    return await this.brainService.processContext(question);
+    logger.info(`Getting context for the question: ${question}`);
+    const result = await this.brainService.processContext(question);
+    logger.info(`Context retrieval complete for question: ${question}`);
+    return result;
   }
   
   /**
    * Generates AI response using OllamaService
+   * @param {string} name_store - Name store
    * @param {string} question - The original question
    * @param {Object} brainResult - Context from BrainService
    * @param {string} number_whatsapp - WhatsApp number
+   * @param {Object} product_data - Data product
    * @returns {Promise<Object>} AI processing result
    * @private
    */
-  async generateAIResponse(question, brainResult, number_whatsapp) {
+  async generateAIResponse(name_store, question, brainResult, number_whatsapp, product_data) {
     return await this.ollamaService.processWithAI(
+      name_store,
       question, 
       brainResult,
-      number_whatsapp
+      number_whatsapp,
+      product_data
     );
   }
   

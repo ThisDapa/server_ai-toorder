@@ -11,6 +11,7 @@ const QuestionProcessor = require('../services/QuestionProcessor');
 const BrainService = require('../services/BrainService');
 const OllamaService = require('../services/OllamaService');
 const validateQuestion = require('../middleware/validateQuestion');
+const { askSchema } = require('../schemas/askSchemas');
 
 // Initialize services
 const questionProcessor = new QuestionProcessor();
@@ -30,6 +31,7 @@ async function questionRoutes(fastify, options) {
   registerAskRoute(fastify);
   registerStatusRoute(fastify);
   registerTestRoute(fastify);
+  registerProductsRoute(fastify);
 }
 
 /**
@@ -37,21 +39,21 @@ async function questionRoutes(fastify, options) {
  * @param {FastifyInstance} fastify - Fastify instance
  */
 function registerAskRoute(fastify) {
-  fastify.post('/ask', async (request, reply) => {
+  fastify.post('/ask', { schema: { body: askSchema } }, async (request, reply) => {
     const questionId = uuidv4();
-    const { question, whatsapp_number } = request.body;
+    const { name_store, question, whatsapp_number, product_data } = request.body;
     
     try {
       // Validate the question
       const validationResult = validateQuestion(request, reply, () => {});
-      if (validationResult === false) return; // validateQuestion handles reply
+      if (validationResult === false) return;
 
       // Log and initialize processing status
       logger.info(`Processing question ${questionId}: ${question}`);
       initializeProcessingStatus(questionId, question);
       
       // Process the question asynchronously
-      processQuestionAsync(questionId, question, whatsapp_number);
+      processQuestionAsync(questionId, name_store, question, whatsapp_number, product_data);
       
       // Send immediate response
       return reply.send({
@@ -128,28 +130,21 @@ function initializeProcessingStatus(questionId, question) {
 /**
  * Process a question asynchronously through the complete pipeline
  * @param {string} questionId - UUID of the question
+ * @param {string} name_store
  * @param {string} question - The question text
  * @param {string} whatsapp_number - WhatsApp number for response delivery
+ * @param {Object} product_data - Product data for context
  */
-async function processQuestionAsync(questionId, question, whatsapp_number) {
+async function processQuestionAsync(questionId,name_store , question, whatsapp_number, product_data) {
   try {
-    // Step 1: Get context from dataset
-    updateStatus(questionId, 'getting_context', 'Retrieving context from dataset');
-    const datasetContext = await brainService.processContext(question);
-    
-    // Step 2: Analyze and tag the question
-    updateStatus(questionId, 'tagging', 'Analyzing and tagging question');
-    const tags = await brainService.tagQuestion(question, datasetContext);
-    
-    // Step 3: Process with AI model
+    // Step 1: Process with AI model
     updateStatus(questionId, 'processing_ai', 'Processing with AI model');
-    const response = await questionProcessor.processQuestion(question, whatsapp_number);
+    const response = await questionProcessor.processQuestion(name_store, question, whatsapp_number, product_data);
     
-    // Step 4: Mark as completed
+    // Step 2: Mark as completed
     const processingTime = Date.now() - processingStatus.get(questionId).startTime;
     updateStatus(questionId, 'completed', 'Processing completed', {
       response,
-      tags,
       processingTime
     });
     
@@ -205,6 +200,315 @@ function setupStatusCleanup() {
       logger.debug(`Cleaned up ${cleanupCount} old question status entries`);
     }
   }, ONE_HOUR_MS);
+}
+
+/**
+ * Register product routes
+ * @param {FastifyInstance} fastify - Fastify instance
+ * 
+ * API Endpoints:
+ * - GET /products - Get all products
+ * - GET /products/search?keyword=xyz - Search products by keyword
+ * - GET /products/:identifier - Get product by code or name
+ * - POST /products - Add a new product
+ * - PUT /products/:productCode - Update product information
+ * - PATCH /products/stock/:productCode - Update product stock
+ * - DELETE /products/:identifier - Delete a product
+ */
+function registerProductsRoute(fastify) {
+  // Get all products
+  fastify.get('/products', async (request, reply) => {
+    try {
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Get product data from OllamaService
+      const products = ollamaService.getProductData();
+      
+      // Return formatted product data
+      return reply.send({
+        success: true,
+        data: products,
+        count: Object.keys(products).length,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error(`Error retrieving products: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to retrieve products'
+      });
+    }
+  });
+  
+
+  
+  // Get product by code or name
+  fastify.get('/products/:identifier', async (request, reply) => {
+    try {
+      const { identifier } = request.params;
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Get all products
+      const allProducts = ollamaService.getProductData();
+      
+      // Find product by code (case insensitive)
+      let product = null;
+      let productName = null;
+      
+      // First try to find by product code
+      for (const [name, details] of Object.entries(allProducts)) {
+        if (details.code.toLowerCase() === identifier.toLowerCase()) {
+          product = details;
+          productName = name;
+          break;
+        }
+      }
+      
+      // If not found by code, try to find by product name
+      if (!product) {
+        for (const [name, details] of Object.entries(allProducts)) {
+          if (name.toLowerCase().includes(identifier.toLowerCase())) {
+            product = details;
+            productName = name;
+            break;
+          }
+        }
+      }
+      
+      // Return product if found
+      if (product) {
+        return reply.send({
+          success: true,
+          productName,
+          product,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        return reply.status(404).send({
+          success: false,
+          error: `Product with identifier '${identifier}' not found`
+        });
+      }
+    } catch (error) {
+      logger.error(`Error retrieving product: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to retrieve product'
+      });
+    }
+  });
+  
+  // Update product stock
+  fastify.patch('/products/stock/:productCode', async (request, reply) => {
+    try {
+      const { productCode } = request.params;
+      const { stock } = request.body;
+      
+      // Validate request body
+      if (stock === undefined) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Stock value is required in request body'
+        });
+      }
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Update product stock
+      const result = ollamaService.updateProductStock(productCode, stock);
+      
+      if (result.success) {
+        return reply.send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        return reply.status(404).send(result);
+      }
+    } catch (error) {
+      logger.error(`Error updating product stock: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to update product stock'
+      });
+    }
+  });
+  
+  // Add new product
+  fastify.post('/products', async (request, reply) => {
+    try {
+      const { name, code, price, stock, description } = request.body;
+      
+      // Validate request body
+      if (!name || !code || !price) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Product name, code, and price are required in request body'
+        });
+      }
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Add new product
+      const result = ollamaService.addProduct(name, code, price, stock, description);
+      
+      if (result.success) {
+        return reply.status(201).send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        return reply.status(400).send(result);
+      }
+    } catch (error) {
+      logger.error(`Error adding new product: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to add new product'
+      });
+    }
+  });
+  
+  // Delete product
+  fastify.delete('/products/:identifier', async (request, reply) => {
+    try {
+      const { identifier } = request.params;
+      
+      if (!identifier) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Product identifier is required'
+        });
+      }
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Remove product
+      const result = ollamaService.removeProduct(identifier);
+      
+      if (result.success) {
+        return reply.send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        return reply.status(404).send(result);
+      }
+    } catch (error) {
+      logger.error(`Error removing product: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to remove product'
+      });
+    }
+  });
+  
+  // Update product information
+  fastify.put('/products/:productCode', async (request, reply) => {
+    try {
+      const { productCode } = request.params;
+      const { price, description } = request.body;
+      
+      if (!productCode) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Product code is required'
+        });
+      }
+      
+      // Validate that at least one update field is provided
+      if (price === undefined && description === undefined) {
+        return reply.status(400).send({
+          success: false,
+          error: 'At least one field to update (price or description) is required'
+        });
+      }
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Update product
+      const updateData = {};
+      if (price !== undefined) updateData.price = price;
+      if (description !== undefined) updateData.description = description;
+      
+      const result = ollamaService.updateProduct(productCode, updateData);
+      
+      if (result.success) {
+        return reply.send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        return reply.status(404).send(result);
+      }
+    } catch (error) {
+      logger.error(`Error updating product: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to update product'
+      });
+    }
+  });
+  
+  // Search products
+  fastify.get('/products/search', async (request, reply) => {
+    try {
+      const { keyword } = request.query;
+      
+      if (!keyword || keyword.trim() === '') {
+        return reply.status(400).send({
+          success: false,
+          error: 'Search keyword is required'
+        });
+      }
+      
+      // Ensure OllamaService is initialized
+      if (!ollamaService.initialized) {
+        await ollamaService.init();
+      }
+      
+      // Search products
+      const result = ollamaService.searchProducts(keyword);
+      
+      if (result.success) {
+        return reply.send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        // Return 200 status even for no results, but with success: false
+        return reply.send({
+          ...result,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      logger.error(`Error searching products: ${error.message}`);
+      return reply.status(500).send({ 
+        success: false, 
+        error: 'Failed to search products'
+      });
+    }
+  });
 }
 
 module.exports = questionRoutes;

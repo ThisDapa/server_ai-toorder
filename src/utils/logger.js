@@ -5,6 +5,8 @@
 
 'use strict';
 
+process.env.DEBUG = '';
+
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
@@ -15,6 +17,7 @@ const CONFIG = {
   SERVICE_NAME: 'ai-server',
   MAX_FILE_SIZE: 5242880, // 5MB
   MAX_FILES: 5,
+  TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss',
   TIMESTAMP_FORMAT: 'YYYY-MM-DD HH:mm:ss',
   CONSOLE_TIMESTAMP_FORMAT: 'HH:mm:ss'
 };
@@ -105,7 +108,7 @@ initializeLogsDirectory();
 // Create logger instance
 const logger = winston.createLogger({
   level: CONFIG.LOG_LEVEL,
-  format: createFileFormat(),
+  format: createConsoleFormat(),
   defaultMeta: { service: CONFIG.SERVICE_NAME },
   transports: [
     createFileTransport(PATHS.ERROR_LOG, 'error'),
@@ -122,7 +125,21 @@ const logger = winston.createLogger({
 // Add console transport for development
 if (process.env.NODE_ENV !== 'production') {
   logger.add(new winston.transports.Console({
-    format: createConsoleFormat()
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.timestamp({
+        format: CONFIG.CONSOLE_TIMESTAMP_FORMAT
+      }),
+      winston.format.printf(formatConsoleOutput),
+      winston.format.metadata({ fillExcept: ['message', 'level', 'timestamp', 'label'] }),
+      // Suppress winston internal logs
+      winston.format(info => {
+        if (info.message && (info.message.startsWith('winston:') || info.message.includes('written'))) {
+          return false;
+        }
+        return info;
+      })(),
+    )
   }));
 }
 
